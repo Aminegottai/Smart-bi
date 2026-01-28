@@ -1,0 +1,165 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart BI - Welcome</title>
+    <link rel="stylesheet" href="{% static 'acountes/style.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        /* ===== Body & Font ===== */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(to right, #1E90FF, #00BFFF); /* palette globale */
+            margin: 0;
+            padding: 0;
+        }
+
+        /* ===== Navbar ===== */
+        .navbar {
+            width: 100%;
+            background: #F0F4F8; /* gris clair pour navbar */
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            position: fixed;
+            top: 0;
+            z-index: 100;
+        }
+        .navbar a {
+            color: #333;
+            text-decoration: none;
+            margin-left: 20px;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        .navbar a:hover { color: #1E90FF; }
+
+        .logo h2 { color: #1E90FF; }
+
+        /* ===== Hero Section ===== */
+        .hero {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 150px 20px 100px;
+            color: white;
+        }
+        .hero h1 {
+            font-size: 50px;
+            margin-bottom: 20px;
+        }
+        .hero p {
+            font-size: 20px;
+            max-width: 700px;
+            margin-bottom: 30px;
+        }
+        .hero .btn {
+            background: #1E90FF;
+            color: white;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        .hero .btn:hover {
+            background: #4FACFE;
+            color: white;
+        }
+
+        /* ===== Features Section ===== */
+        .features {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 30px;
+            padding: 50px 20px;
+        }
+        .feature-card {
+            background: #F0F4F8; /* gris clair pour les cards */
+            color: #333;
+            width: 250px;
+            padding: 30px 20px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            transition: 0.3s;
+        }
+        .feature-card i {
+            font-size: 40px;
+            color: #1E90FF; /* icone en bleu vif */
+            margin-bottom: 15px;
+        }
+        .feature-card h3 { margin-bottom: 10px; }
+        .feature-card p { font-size: 14px; color: #666; }
+        .feature-card:hover { transform: translateY(-10px); }
+
+        /* ===== Footer ===== */
+        footer {
+            text-align: center;
+            padding: 30px;
+            color: white;
+            background: #1E90FF; /* footer bleu vif */
+        }
+
+        @media(max-width: 768px){
+            .features { flex-direction: column; align-items: center; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<div class="navbar">
+    <div class="logo">
+        <h2>Smart BI</h2>
+    </div>
+    <div class="nav-links">
+        <a href="{% url 'login' %}">Login</a>
+        <a href="{% url 'register' %}">Register</a>
+    </div>
+</div>
+
+<!-- Hero Section -->
+<div class="hero">
+    <h1>Smart Business Intelligence</h1>
+    <p>Smart BI vous aide à transformer vos données en décisions éclairées. Gérez vos datasets, automatisez les analyses avec nos agents IA et générez des rapports détaillés facilement.</p>
+    <a href="{% url 'register' %}" class="btn">Get Started</a>
+</div>
+
+<!-- Features Section -->
+<div class="features">
+    <div class="feature-card">
+        <i class="fas fa-database"></i>
+        <h3>Datasets</h3>
+        <p>Importez et gérez vos données en toute simplicité.</p>
+    </div>
+    <div class="feature-card">
+        <i class="fas fa-robot"></i>
+        <h3>AI Agents</h3>
+        <p>Automatisez vos analyses et décisions avec nos agents intelligents.</p>
+    </div>
+    <div class="feature-card">
+        <i class="fas fa-chart-line"></i>
+        <h3>Analytics</h3>
+        <p>Visualisez vos ventes, performances et tendances rapidement.</p>
+    </div>
+    <div class="feature-card">
+        <i class="fas fa-file-alt"></i>
+        <h3>Reports</h3>
+        <p>Générez des rapports détaillés et prêts à partager.</p>
+    </div>
+</div>
+
+<!-- Footer -->
+<footer>
+    &copy; 2026 Smart BI. All rights reserved.
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dashboard BI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-100 text-slate-900">
+  <div class="min-h-screen flex">
+
+    <!-- SIDEBAR -->
+    <aside class="w-64 bg-slate-900 text-white hidden md:flex flex-col">
+      <div class="px-6 py-6 text-2xl font-bold border-b border-slate-700">Smart BI</div>
+      <nav class="flex-1 px-4 py-6 space-y-3 text-sm">
+        <a class="block px-3 py-2 rounded-lg bg-slate-800">Dashboard</a>
+        <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Exploration</a>
+        <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Rapports</a>
+        <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Modèles ML</a>
+        <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Paramètres</a>
+      </nav>
+      <div class="px-4 py-4 text-xs text-slate-400 border-t border-slate-700">v1.0</div>
+    </aside>
+
+    <!-- MAIN -->
+    <div class="flex-1 flex flex-col">
+      <!-- HEADER -->
+      <header class="bg-white border-b border-slate-200">
+        <div class="max-w-7xl mx-auto px-6 py-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 class="text-2xl md:text-3xl font-bold">Dashboard BI</h1>
+            <p class="text-slate-500">Analyse intelligente des données</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-sm">
+              Dataset: <strong id="dataset_name" class="text-indigo-600">{{ dataset_name }}</strong>
+            </span>
+            <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-sm">
+              Lignes: <strong id="rows">--</strong>
+            </span>
+            <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-sm">
+              Colonnes: <strong id="cols">--</strong>
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <!-- CONTENT -->
+      <main class="max-w-7xl mx-auto px-6 py-8 space-y-6 w-full">
+
+        <!-- KPI Cards -->
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div class="bg-white rounded-2xl shadow-sm p-5 border border-slate-200">
+            <p class="text-sm text-slate-500">Doublons</p>
+            <p id="kpi_duplicates" class="text-2xl font-semibold mt-1">--</p>
+          </div>
+          <div class="bg-white rounded-2xl shadow-sm p-5 border border-slate-200">
+            <p class="text-sm text-slate-500">Valeurs manquantes (total)</p>
+            <p id="kpi_missing_total" class="text-2xl font-semibold mt-1">--</p>
+          </div>
+        </section>
+
+        <!-- Missing Values Table -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
+          <h2 class="text-lg font-semibold mb-4">Tableau des valeurs manquantes</h2>
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead>
+                <tr class="text-left text-slate-500 border-b">
+                  <th class="py-2 px-3">Colonne</th>
+                  <th class="py-2 px-3">Valeurs manquantes</th>
+                </tr>
+              </thead>
+              <tbody id="missing_table_body" class="divide-y"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Summary Tables -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Résumé par type de colonne</h2>
+          </div>
+          <div id="summary_tables" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </section>
+
+        <!-- Visuals -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Visualisations</h2>
+          </div>
+          <div id="graphs" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </section>
+
+        <!-- ML -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
+          <h2 class="text-lg font-semibold mb-4">Analyse ML</h2>
+          <div id="ml_analysis" class="text-sm text-slate-700"></div>
+        </section>
+      </main>
+
+      <footer class="text-center text-xs text-slate-500 py-6">
+        Généré par Smart BI
+      </footer>
+    </div>
+  </div>
+
+  <script>
+    const agent2_result = JSON.parse('{{ agent2_result_json|default:"{}"|escapejs }}');
+
+
+    document.getElementById("rows").innerText = agent2_result.shape ? agent2_result.shape[0] : "--";
+    document.getElementById("cols").innerText = agent2_result.shape ? agent2_result.shape[1] : "--";
+
+    document.getElementById("kpi_duplicates").innerText = agent2_result.duplicates ?? "--";
+
+    // Missing values total + table
+    const missing = agent2_result.missing_values ?? {};
+    const missingTotal = Object.values(missing).reduce((a, b) => a + b, 0);
+    document.getElementById("kpi_missing_total").innerText = missingTotal;
+
+    const missingTable = document.getElementById("missing_table_body");
+    missingTable.innerHTML = Object.entries(missing)
+      .map(([col, val]) => `
+        <tr>
+          <td class="py-2 px-3">${col}</td>
+          <td class="py-2 px-3 font-medium">${val}</td>
+        </tr>
+      `).join("");
+
+    // SUMMARY TABLES
+    const summaryDiv = document.getElementById("summary_tables");
+
+    if (agent2_result.numeric_summary) {
+      for (const col in agent2_result.numeric_summary) {
+        const stats = agent2_result.numeric_summary[col];
+        const card = document.createElement("div");
+        card.className = "bg-slate-50 p-4 rounded-xl border border-slate-200";
+        card.innerHTML = `
+          <h3 class="font-semibold text-slate-700 mb-2">${col} <span class="text-xs text-emerald-600">(Numérique)</span></h3>
+          <ul class="space-y-1 text-sm text-slate-600">
+            ${Object.entries(stats).map(([k,v])=>`<li class="flex justify-between"><span>${k}</span><span class="font-medium">${v}</span></li>`).join("")}
+          </ul>`;
+        summaryDiv.appendChild(card);
+      }
+    }
+
+    if (agent2_result.categorical_summary) {
+      for (const col in agent2_result.categorical_summary) {
+        const stats = agent2_result.categorical_summary[col];
+        const card = document.createElement("div");
+        card.className = "bg-slate-50 p-4 rounded-xl border border-slate-200";
+        card.innerHTML = `
+          <h3 class="font-semibold text-slate-700 mb-2">${col} <span class="text-xs text-indigo-600">(Catégorielle)</span></h3>
+          <ul class="space-y-1 text-sm text-slate-600">
+            ${Object.entries(stats).map(([k,v])=>`<li class="flex justify-between"><span>${k}</span><span class="font-medium">${v}</span></li>`).join("")}
+          </ul>`;
+        summaryDiv.appendChild(card);
+      }
+    }
+
+    const graphsDiv = document.getElementById("graphs");
+    if (agent2_result.visualizations) {
+      agent2_result.visualizations.forEach(path => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "bg-slate-50 p-3 rounded-xl border border-slate-200";
+        const img = document.createElement("img");
+        img.src = path;
+        img.className = "rounded-lg w-full h-auto";
+        wrapper.appendChild(img);
+        graphsDiv.appendChild(wrapper);
+      });
+    }
+
+    const mlDiv = document.getElementById("ml_analysis");
+    if (agent2_result.ml_analysis && agent2_result.ml_analysis.status === "success") {
+      const ml = agent2_result.ml_analysis;
+      mlDiv.innerHTML = `
+        <div class="space-y-2">
+          <p><strong>Task:</strong> ${ml.task}</p>
+          <p><strong>Target Column:</strong> ${ml.target_column}</p>
+          <p><strong>Metrics:</strong> ${JSON.stringify(ml.metrics)}</p>
+          <div>
+            <p class="font-semibold mt-2">Feature Importances</p>
+            <ul class="list-disc pl-5 text-slate-600">
+              ${ml.feature_importances.map(f=>`<li>${f.feature}: ${f.importance}</li>`).join("")}
+            </ul>
+          </div>
+        </div>
+      `;
+    } else {
+      mlDiv.innerHTML = `<p>${agent2_result.ml_analysis?.message || "Analyse ML non disponible"}</p>`;
+    }
+  </script>
+</body>
+</html>

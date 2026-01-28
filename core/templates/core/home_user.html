@@ -1,0 +1,130 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart BI - Dashboard</title>
+    <link rel="stylesheet" href="{% static 'acountes/style.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f0f4f8;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Navbar */
+        .navbar {
+            width: 100%;
+            background: #1E90FF;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+            position: fixed;
+            top: 0;
+            z-index: 100;
+        }
+        .navbar a { color: white; text-decoration: none; margin-left: 20px; font-weight: bold; }
+        .navbar a:hover { color: #00BFFF; }
+        .navbar .user-info { display: flex; align-items: center; gap: 15px; }
+
+        /* Hero */
+        .hero {
+            text-align: center;
+            padding: 120px 20px 50px;
+        }
+        .hero h1 { font-size: 40px; margin-bottom: 10px; color: #1E90FF; }
+        .hero p { font-size: 18px; color: #333; margin-bottom: 30px; }
+
+        /* Actions */
+        .actions { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 50px; }
+        .action-card {
+            background: white;
+            padding: 30px 20px;
+            border-radius: 15px;
+            width: 250px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            transition: 0.3s;
+        }
+        .action-card:hover { transform: translateY(-10px); }
+        .action-card i { font-size: 40px; color: #1E90FF; margin-bottom: 15px; }
+
+        /* Dataset list */
+        .dataset-list { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; padding: 20px; }
+        .dataset-card {
+            background: white;
+            border-radius: 15px;
+            width: 300px;
+            padding: 20px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            transition: 0.3s;
+        }
+        .dataset-card:hover { transform: translateY(-10px); }
+        .dataset-card h3 { margin-bottom: 10px; color: #1E90FF; }
+        .dataset-card p { font-size: 14px; color: #666; margin-bottom: 10px; }
+        .dataset-card .btn {
+            display: inline-block;
+            margin: 5px 5px 0 0;
+            padding: 10px 15px;
+            border-radius: 10px;
+            background: #1E90FF;
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        .dataset-card .btn:hover { background: #00BFFF; }
+
+        footer { text-align: center; padding: 20px; color: white; background: #1E90FF; margin-top: 50px; }
+        @media(max-width: 768px){ .actions, .dataset-list { flex-direction: column; align-items: center; } }
+    </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<div class="navbar">
+    <div class="logo"><h2>Smart BI</h2></div>
+    <div class="user-info">
+        <span>{{ user.username }}</span>
+        <a href="{% url 'profile' %}"><i class="fas fa-user-cog"></i> Profile</a>
+        <a href="{% url 'logout' %}"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    </div>
+</div>
+
+<!-- Hero -->
+<div class="hero">
+    <h1>Bienvenue, {{ user.username}} !</h1>
+    <p>Gérez vos datasets, automatisez vos analyses et générez des rapports détaillés avec nos agents IA.</p>
+</div>
+
+<!-- Actions -->
+<div class="actions">
+    <div class="action-card">
+        <i class="fas fa-upload"></i>
+        <h3>Upload Dataset</h3>
+        <p>Ajoutez vos données pour analyse</p>
+        <a href="{% url 'dataset_upload' %}" class="btn">Upload</a>
+    </div>
+</div>
+
+<!-- Dataset List -->
+<div class="dataset-list">
+    {% for dataset in datasets %}
+    <div class="dataset-card">
+        <h3>{{ dataset.name }}</h3>
+        <p>Uploadé le : {{ dataset.uploaded_at|date:"d/m/Y" }}</p>
+    </div>
+    {% empty %}
+    <p>Aucun dataset pour l’instant. Ajoutez-en un !</p>
+    {% endfor %}
+</div>
+
+<footer>
+    &copy; 2026 Smart BI. Tous droits réservés.
+</footer>
+
+</body>
+</html>

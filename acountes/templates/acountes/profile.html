@@ -1,0 +1,21 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Profile - Smart BI</title>
+    <link rel="stylesheet" href="{% static 'accounts/style.css' %}">
+</head>
+<body>
+<div class="login-container">
+    <h2>Welcome, {{ user.username }}!</h2>
+    <p><strong>Email:</strong> {{ user.email }}</p>
+    {% if user.company_name %}
+        <p><strong>Company:</strong> {{ user.company_name }}</p>
+    {% endif %}
+    <p><strong>Joined:</strong> {{ user.date_joined|date:"d M Y" }}</p>
+
+    <a href="{% url 'logout' %}" class="btn">Logout</a>
+</div>
+</body>
+</html>

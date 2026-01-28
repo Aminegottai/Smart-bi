@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Analyse en cours...</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="flex items-center justify-center min-h-screen bg-gray-100">
+    <div class="text-center">
+        <h1 class="text-3xl font-bold mb-4">Analyse en cours...</h1>
+        <p class="mb-6">Merci de patienter, vos données sont en cours de traitement.</p>
+        <div class="inline-block animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-500"></div>
+    </div>
+
+    <script>
+    const checkUrl = "{{ check_url }}";
+    const dashboardUrl = "{{ dashboard_url }}";
+
+    async function checkStatus() {
+        try {
+            const response = await fetch(checkUrl);
+            const text = await response.text();
+
+            // DEBUG : ce que le serveur renvoie
+            console.log("Réponse brute:", text);
+
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                console.error("Erreur JSON.parse:", err);
+                // Réessayer dans 5s si JSON invalide
+                setTimeout(checkStatus, 5000);
+                return;
+            }
+
+            if (data.status === "done") {
+                console.log("Analyse terminée, redirection...");
+                window.location.href = dashboardUrl;
+            } else if (data.status === "pending") {
+                console.log("Analyse en cours...");
+                setTimeout(checkStatus, 2000);
+            } else if (data.status === "error") {
+                console.error("Erreur côté serveur:", data.message);
+            }
+
+        } catch (err) {
+            console.error("Erreur fetch:", err);
+            setTimeout(checkStatus, 5000);
+        }
+    }
+
+    checkStatus();
+</script>
+
+</body>
+</html>

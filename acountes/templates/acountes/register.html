@@ -1,0 +1,20 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Register - Smart BI</title>
+    <link rel="stylesheet" href="{% static 'acountes/style.css' %}">
+</head>
+<body>
+<div class="login-container">
+    <h2>Create Your Account</h2>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="btn">Register</button>
+    </form>
+    <p>Already have an account? <a href="{% url 'login' %}">Login here</a></p>
+</div>
+</body>
+</html>
