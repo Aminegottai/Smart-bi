@@ -19,9 +19,8 @@ def agent2_analysis_view(request, dataset_id):
     dataset_path = Path(dataset.file.path)
 
 
-    # Étape 2 : exécuter agent2 avec le dataset et les rôles de colonnes
     try:
-        result = analyze_csv_dataset(dataset_path)
+        result = analyze_csv_dataset(dataset_path,dataset_id)
     except Exception as e:
         return JsonResponse({"status": "error", "message": f"Agent2 failed: {str(e)}"}, status=500)
 

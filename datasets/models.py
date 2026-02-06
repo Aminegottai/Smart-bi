@@ -6,5 +6,7 @@ class Dataset(models.Model):
     file = models.FileField(upload_to="datasets/")
     uploaded_at = models.DateTimeField(auto_now_add=True)
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='datasets')
+    analysis_json = models.JSONField(null=True, blank=True)
+
 
 

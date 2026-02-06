@@ -23,9 +23,9 @@ def run_analysis(dataset_path, filename, dataset_id):
     global ANALYSIS_RESULTS
     try:
         if filename.endswith('.csv'):
-            result = analyze_csv_dataset(dataset_path)
+            result = analyze_csv_dataset(dataset_path, dataset_id)
         elif filename.endswith('.zip'):
-            result = analyze_image_dataset(dataset_path)
+            result = analyze_image_dataset(dataset_path,dataset_id=dataset_id)
         else:
             result = {"status": "error", "message": "Seuls CSV ou ZIP d'images sont supportés"}
     except Exception as e:
@@ -37,6 +37,14 @@ def run_analysis(dataset_path, filename, dataset_id):
 # ------------------------
 # Upload d'un dataset
 # ------------------------
+import threading
+from django.shortcuts import render
+from django.http import JsonResponse
+from django.urls import reverse
+from django.contrib.auth.decorators import login_required
+from datasets.forms import DatasetUploadForm
+from datasets.models import Dataset
+
 @login_required
 def dataset_upload_view(request):
     if request.method == 'POST':
@@ -45,6 +53,15 @@ def dataset_upload_view(request):
             dataset = form.save(commit=False)
             dataset.user = request.user
             dataset.save()
+
+            # 🔹 DEBUG
+            print("✅ Dataset sauvegardé")
+            print("Dataset instance:", dataset)
+            print("Dataset id:", dataset.id)
+            print("Dataset file path:", dataset.file.path)
+
+            if dataset.id is None:
+                return JsonResponse({"status": "error", "message": "Impossible de récupérer l'ID du dataset."})
 
             dataset_id = dataset.id
             dataset_path = dataset.file.path
@@ -55,8 +72,12 @@ def dataset_upload_view(request):
             thread.start()
 
             # URLs pour le loading
-            check_url = reverse('core:check_status', kwargs={'dataset_id': dataset_id})
-            dashboard_url = reverse('core:dashboard_bi', kwargs={'dataset_id': dataset_id})
+            try:
+                check_url = reverse('core:check_status', kwargs={'dataset_id': dataset_id})
+                dashboard_url = reverse('core:dashboard_bi', kwargs={'dataset_id': dataset_id})
+            except Exception as e:
+                print("❌ Erreur reverse URL :", e)
+                return JsonResponse({"status": "error", "message": str(e)})
 
             # Rediriger vers la page de loading
             return render(request, "core/loading.html", {
@@ -68,6 +89,7 @@ def dataset_upload_view(request):
 
     form = DatasetUploadForm()
     return render(request, 'datasets/upload_form.html', {'form': form})
+
 
 
 # ------------------------
@@ -94,9 +116,9 @@ def dashboard_view(request, dataset_id):
         dataset_path = dataset.file.path
         filename = dataset.file.name.lower()
         if filename.endswith('.csv'):
-            result = analyze_csv_dataset(dataset_path)
+            result = analyze_csv_dataset(dataset_path,dataset_id)
         else:
-            result = analyze_image_dataset(dataset_path)
+            result = analyze_image_dataset(dataset_path,dataset_id)
         ANALYSIS_RESULTS[dataset_id] = result
 
     return render(request, "core/dashboard_bi.html", {

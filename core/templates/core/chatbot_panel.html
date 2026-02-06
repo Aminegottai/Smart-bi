@@ -1,0 +1,162 @@
+<!-- Chatbot floating widget (small box) -->
+<div id="chatbot-widget" class="fixed bottom-5 right-5 z-50">
+  <!-- Toggle button -->
+  <button
+    id="chatbot-toggle"
+    type="button"
+    class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-full shadow-lg flex items-center gap-2"
+  >
+    <span class="font-semibold">🤖 Assistant</span>
+    <span id="chatbot-toggle-icon" class="text-lg">▲</span>
+  </button>
+
+  <!-- Panel -->
+  <section
+    id="chatbot-panel"
+    data-dataset-id="{{ dataset.id }}"
+    class="mt-3 w-80 md:w-96 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden"
+  >
+    <!-- Header -->
+    <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+      <div>
+        <p class="font-semibold">Smart BI Assistant</p>
+        <p class="text-xs text-slate-300">EDA • Graph summaries • PCA • Clustering</p>
+      </div>
+      <button id="chatbot-close" type="button" class="text-slate-200 hover:text-white">✕</button>
+    </div>
+
+    <!-- Body -->
+    <div class="p-4 bg-slate-50">
+      <p class="text-xs text-slate-500 mb-3">
+        Exemple: “Quelles corrélations sont les plus fortes ?” / “Quel est le silhouette score ?”
+      </p>
+
+      <textarea
+        id="chatbot-question"
+        class="w-full border border-slate-300 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+        rows="3"
+        placeholder="Écris ta question…"
+      ></textarea>
+
+      <div class="flex items-center gap-2 mt-3">
+        <button
+          id="chatbot-btn"
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold"
+          type="button"
+        >
+          Envoyer
+        </button>
+
+        <span id="chatbot-loading" class="hidden text-sm text-slate-500">
+          ⏳ Analyse en cours...
+        </span>
+      </div>
+
+      <div
+        id="chatbot-answer"
+        class="mt-4 text-sm text-slate-800 whitespace-pre-line bg-white border border-slate-200 rounded-xl p-3 max-h-64 overflow-y-auto"
+      ></div>
+    </div>
+  </section>
+</div>
+
+<script>
+  // =========================
+  // CSRF token helper
+  // =========================
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+      const cookies = document.cookie.split(";");
+      for (let cookie of cookies) {
+        cookie = cookie.trim();
+        if (cookie.startsWith(name + "=")) {
+          cookieValue = decodeURIComponent(cookie.slice(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  // =========================
+  // Open/close widget
+  // =========================
+  const panel = document.getElementById("chatbot-panel");
+  const toggleBtn = document.getElementById("chatbot-toggle");
+  const closeBtn = document.getElementById("chatbot-close");
+  const toggleIcon = document.getElementById("chatbot-toggle-icon");
+
+  function setOpen(isOpen) {
+    panel.style.display = isOpen ? "block" : "none";
+    toggleIcon.textContent = isOpen ? "▲" : "▼";
+  }
+
+  // Open by default (change to false if you want closed on load)
+  setOpen(true);
+
+  toggleBtn.addEventListener("click", () => {
+    const isOpen = panel.style.display !== "none";
+    setOpen(!isOpen);
+  });
+  closeBtn.addEventListener("click", () => setOpen(false));
+
+  // =========================
+  // Chat request (polling)
+  // =========================
+  function askChatbot(datasetId) {
+    const questionEl = document.getElementById("chatbot-question");
+    const question = questionEl.value.trim();
+    if (!question) return;
+
+    const loader = document.getElementById("chatbot-loading");
+    const answerDiv = document.getElementById("chatbot-answer");
+
+    loader.classList.remove("hidden");
+    answerDiv.innerText = "";
+
+    function fetchAnswer() {
+      fetch(`/chatbot/${datasetId}/`, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": getCookie("csrftoken"),
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({ question })
+      })
+      .then(res => res.json())
+      .then(data => {
+        console.log("[CHATBOT] data reçu :", data);
+
+        const ans = (data && data.answer) ? String(data.answer) : "";
+        if (ans.toLowerCase().includes("en cours")) {
+          setTimeout(fetchAnswer, 2000);
+        } else {
+          loader.classList.add("hidden");
+          answerDiv.innerText = ans || "Pas de réponse.";
+        }
+      })
+      .catch(err => {
+        loader.classList.add("hidden");
+        answerDiv.innerText = "❌ Erreur serveur";
+        console.error(err);
+      });
+    }
+
+    fetchAnswer();
+  }
+
+  // Button click
+  document.getElementById("chatbot-btn").addEventListener("click", () => {
+    const datasetId = panel.dataset.datasetId;
+    askChatbot(datasetId);
+  });
+
+  // Enter to send (Ctrl+Enter / Cmd+Enter)
+  document.getElementById("chatbot-question").addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      const datasetId = panel.dataset.datasetId;
+      askChatbot(datasetId);
+    }
+  });
+</script>

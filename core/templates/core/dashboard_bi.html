@@ -1,3 +1,5 @@
+{% include "core/chatbot_panel.html" %}
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -99,27 +101,37 @@
           <div id="ml_analysis" class="text-sm text-slate-700"></div>
         </section>
       </main>
-
-      <footer class="text-center text-xs text-slate-500 py-6">
-        Généré par Smart BI
-      </footer>
-    </div>
-  </div>
-
-  <script>
+      <script>
+try {
+    // 🔹 Parse JSON agent2_result
     const agent2_result = JSON.parse('{{ agent2_result_json|default:"{}"|escapejs }}');
+    console.log("[DEBUG] agent2_result brut:", agent2_result);
 
+    // 🔹 Vérifier la shape
+    let shapeStr = agent2_result.shape || "";
+    console.log("[DEBUG] shapeStr:", shapeStr);
 
-    document.getElementById("rows").innerText = agent2_result.shape ? agent2_result.shape[0] : "--";
-    document.getElementById("cols").innerText = agent2_result.shape ? agent2_result.shape[1] : "--";
+    shapeStr = shapeStr.replace(")", "").replace("(", "");
+    let shapeArr = shapeStr.split(",").map(s => parseInt(s.trim()));
 
+    let rows = shapeArr[0] || "--";
+    let cols = shapeArr[1] || "--";
+    console.log("[DEBUG] rows:", rows, "cols:", cols);
+
+    document.getElementById("rows").innerText = rows;
+    document.getElementById("cols").innerText = cols;
+
+    // 🔹 Doublons
+    console.log("[DEBUG] duplicates:", agent2_result.duplicates);
     document.getElementById("kpi_duplicates").innerText = agent2_result.duplicates ?? "--";
 
-    // Missing values total + table
+    // 🔹 Valeurs manquantes
     const missing = agent2_result.missing_values ?? {};
     const missingTotal = Object.values(missing).reduce((a, b) => a + b, 0);
+    console.log("[DEBUG] missingTotal:", missingTotal, "détails:", missing);
     document.getElementById("kpi_missing_total").innerText = missingTotal;
 
+    // 🔹 Tableau valeurs manquantes
     const missingTable = document.getElementById("missing_table_body");
     missingTable.innerHTML = Object.entries(missing)
       .map(([col, val]) => `
@@ -129,9 +141,10 @@
         </tr>
       `).join("");
 
-    // SUMMARY TABLES
+    // 🔹 Résumé par type
     const summaryDiv = document.getElementById("summary_tables");
-
+    summaryDiv.innerHTML = ""; // clear
+    console.log("[DEBUG] numeric_summary:", agent2_result.numeric_summary);
     if (agent2_result.numeric_summary) {
       for (const col in agent2_result.numeric_summary) {
         const stats = agent2_result.numeric_summary[col];
@@ -146,6 +159,7 @@
       }
     }
 
+    console.log("[DEBUG] categorical_summary:", agent2_result.categorical_summary);
     if (agent2_result.categorical_summary) {
       for (const col in agent2_result.categorical_summary) {
         const stats = agent2_result.categorical_summary[col];
@@ -160,7 +174,10 @@
       }
     }
 
+    // 🔹 Graphiques
     const graphsDiv = document.getElementById("graphs");
+    graphsDiv.innerHTML = ""; // clear
+    console.log("[DEBUG] visualizations:", agent2_result.visualizations);
     if (agent2_result.visualizations) {
       agent2_result.visualizations.forEach(path => {
         const wrapper = document.createElement("div");
@@ -171,8 +188,11 @@
         wrapper.appendChild(img);
         graphsDiv.appendChild(wrapper);
       });
+    } else {
+        console.warn("[DEBUG] Aucun graphique généré !");
     }
 
+    // 🔹 ML analysis
     const mlDiv = document.getElementById("ml_analysis");
     if (agent2_result.ml_analysis && agent2_result.ml_analysis.status === "success") {
       const ml = agent2_result.ml_analysis;
@@ -191,7 +211,34 @@
       `;
     } else {
       mlDiv.innerHTML = `<p>${agent2_result.ml_analysis?.message || "Analyse ML non disponible"}</p>`;
+      console.warn("[DEBUG] ML analysis non disponible ou erreur")
     }
-  </script>
+
+} catch(e) {
+    console.error("[DEBUG] ERREUR JS:", e);
+}
+async function sendQuestion() {
+    const question = document.getElementById("chat-input").value;
+
+    const response = await fetch("/chatbot/{{ dataset.id }}/", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            question: question
+        })
+    });
+
+    const data = await response.json();
+    document.getElementById("chat-response").innerText = data.answer;}
+</script>
+
+
+      <footer class="text-center text-xs text-slate-500 py-6">
+        Généré par Smart BI
+      </footer>
+    </div>
+  </div>
 </body>
 </html>

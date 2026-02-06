@@ -1,27 +1,15 @@
 from math import sqrt
 from pathlib import Path
+from collections import Counter
 
 import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+import numpy as np
 from sklearn.cluster import KMeans
-from sklearn.compose import ColumnTransformer
 from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.impute import SimpleImputer
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    mean_absolute_error,
-    mean_squared_error,
-    r2_score,
-    roc_auc_score,
-)
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
-
+from sklearn.metrics import silhouette_score
 
 matplotlib.use("Agg")
 sns.set_theme(style="whitegrid")
@@ -29,6 +17,15 @@ sns.set_theme(style="whitegrid")
 GRAPH_DIR = Path("media/graphs")
 GRAPH_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _parse_dates(series: pd.Series):
+    """
+    Convertit une série en datetime sans générer de warnings.
+    """
+    try:
+        return pd.to_datetime(series, errors="coerce", dayfirst=True)
+    except Exception:
+        return pd.to_datetime(series.astype(str), errors="coerce", dayfirst=True)
 
 
 def _detect_types(df: pd.DataFrame):
@@ -39,24 +36,26 @@ def _detect_types(df: pd.DataFrame):
     for col in df.columns:
         if col in num_cols:
             continue
-        
+
         parsed = _parse_dates(df[col])
         if parsed.notna().mean() >= 0.6:
             date_cols.append(col)
             if col in cat_cols:
                 cat_cols.remove(col)
 
-    return {
-        "numeric": num_cols,
-        "categorical": cat_cols,
-        "date": date_cols,
-    }
+    return {"numeric": num_cols, "categorical": cat_cols, "date": date_cols}
+
+
+def get_graph_dir_by_id(dataset_id: int) -> Path:
+    graph_dir = Path("media/graphs") / f"dataset_{dataset_id}"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    return graph_dir
 
 
 def _iqr_outliers(df: pd.DataFrame, num_cols):
     outliers = {}
     for col in num_cols:
-        series = df[col].dropna()
+        series = pd.to_numeric(df[col], errors="coerce").dropna()
         if series.empty:
             outliers[col] = {"count": 0, "ratio": 0.0}
             continue
@@ -71,7 +70,7 @@ def _iqr_outliers(df: pd.DataFrame, num_cols):
 def _top_correlations(df: pd.DataFrame, num_cols, top_n: int = 15):
     if len(num_cols) < 2:
         return []
-    corr = df[num_cols].corr().abs()
+    corr = df[num_cols].corr(numeric_only=True).abs()
     for i in range(len(num_cols)):
         corr.iat[i, i] = 0
     pairs = (
@@ -79,141 +78,271 @@ def _top_correlations(df: pd.DataFrame, num_cols, top_n: int = 15):
         .reset_index()
         .rename(columns={"level_0": "feature_1", "level_1": "feature_2", 0: "corr"})
     )
-    pairs = pairs.sort_values("corr", ascending=False).drop_duplicates(subset=["corr", "feature_1", "feature_2"])
+    pairs = pairs.sort_values("corr", ascending=False)
     return pairs.head(top_n).to_dict(orient="records")
 
 
-def _generate_graphs(df: pd.DataFrame, types: dict, dataset_name: str, max_graphs_per_type: int = 8):
+def _generate_graphs(
+    df: pd.DataFrame,
+    types: dict,
+    dataset_name: str,
+    dataset_id: int,
+    max_graphs_per_type: int = 8,
+):
+    """
+    Génère les graphes (png) et retourne la liste des paths.
+    NOTE: on garde la limite max_graphs_per_type pour éviter trop d'images.
+    """
+    graph_dir = get_graph_dir_by_id(dataset_id)
     graphs = []
-    for col in types["numeric"][:max_graphs_per_type]:
-        plt.figure()
-        sns.histplot(df[col].dropna(), kde=True)
-        plt.title(f"Distribution de {col}")
-        path = GRAPH_DIR / f"{dataset_name}_{col}_hist.png"
-        plt.savefig(path, bbox_inches="tight")
-        plt.close()
-        graphs.append(f"/media/graphs/{path.name}")
 
     for col in types["numeric"][:max_graphs_per_type]:
         plt.figure()
-        sns.boxplot(x=df[col])
-        plt.title(f"Boxplot de {col}")
-        path = GRAPH_DIR / f"{dataset_name}_{col}_box.png"
+        sns.histplot(pd.to_numeric(df[col], errors="coerce").dropna(), kde=True)
+        plt.title(f"Distribution de {col}")
+        path = graph_dir / f"{dataset_name}_{col}_hist.png"
         plt.savefig(path, bbox_inches="tight")
         plt.close()
-        graphs.append(f"/media/graphs/{path.name}")
+        graphs.append(f"/media/graphs/dataset_{dataset_id}/{path.name}")
+
+    for col in types["numeric"][:max_graphs_per_type]:
+        plt.figure()
+        sns.boxplot(x=pd.to_numeric(df[col], errors="coerce"))
+        plt.title(f"Boxplot de {col}")
+        path = graph_dir / f"{dataset_name}_{col}_box.png"
+        plt.savefig(path, bbox_inches="tight")
+        plt.close()
+        graphs.append(f"/media/graphs/dataset_{dataset_id}/{path.name}")
 
     for col in types["categorical"][:max_graphs_per_type]:
         plt.figure(figsize=(8, 4))
         df[col].value_counts().head(15).plot(kind="bar")
         plt.title(f"Top catégories de {col}")
         plt.xticks(rotation=30, ha="right")
-        path = GRAPH_DIR / f"{dataset_name}_{col}_bar.png"
+        path = graph_dir / f"{dataset_name}_{col}_bar.png"
         plt.savefig(path, bbox_inches="tight")
         plt.close()
-        graphs.append(f"/media/graphs/{path.name}")
+        graphs.append(f"/media/graphs/dataset_{dataset_id}/{path.name}")
 
     if len(types["numeric"]) >= 2:
         plt.figure(figsize=(10, 6))
-        sns.heatmap(df[types["numeric"]].corr(), annot=False, cmap="coolwarm")
+        sns.heatmap(df[types["numeric"]].corr(numeric_only=True), annot=False, cmap="coolwarm")
         plt.title("Matrice de corrélation")
-        path = GRAPH_DIR / f"{dataset_name}_correlation_matrix.png"
+        path = graph_dir / f"{dataset_name}_correlation_matrix.png"
         plt.savefig(path, bbox_inches="tight")
         plt.close()
-        graphs.append(f"/media/graphs/{path.name}")
+        graphs.append(f"/media/graphs/dataset_{dataset_id}/{path.name}")
 
     if types["date"] and types["numeric"]:
         date_col = types["date"][0]
-        date_series = pd.to_datetime(df[date_col], errors="coerce",dayfirst=True)
+        date_series = _parse_dates(df[date_col])
+
         for num_col in types["numeric"][:max_graphs_per_type]:
             plt.figure(figsize=(10, 4))
             tmp = df[[num_col]].copy()
             tmp[date_col] = date_series
+            tmp[num_col] = pd.to_numeric(tmp[num_col], errors="coerce")
             tmp = tmp.dropna(subset=[date_col]).sort_values(date_col)
+
             tmp.groupby(date_col)[num_col].mean().plot()
-            plt.title(f"Tendance temporelle de {num_col} (moyenne)")
-            plt.xticks(rotation=30, ha="right")
-            path = GRAPH_DIR / f"{dataset_name}_{num_col}_trend.png"
+            plt.title(f"Tendance temporelle de {num_col}")
+            path = graph_dir / f"{dataset_name}_{num_col}_trend.png"
             plt.savefig(path, bbox_inches="tight")
             plt.close()
-            graphs.append(f"/media/graphs/{path.name}")
+            graphs.append(f"/media/graphs/dataset_{dataset_id}/{path.name}")
 
     return graphs
 
 
-def _run_clustering(df: pd.DataFrame, types: dict):
+def _run_clustering(df: pd.DataFrame, types: dict, dataset_id: int):
+    """
+    Clustering KMeans + projection PCA 2D + métriques (silhouette, inertie)
+    IMPORTANT: toutes les valeurs sont converties en types JSON-safe.
+    """
     num_cols = types["numeric"]
     if len(num_cols) < 2 or len(df) < 3:
         return {"status": "skipped", "reason": "Pas assez de colonnes numériques pour le clustering."}
 
-    X = df[num_cols].fillna(0)
+    X = df[num_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
     n_clusters = min(4, len(X))
     if n_clusters < 2:
         return {"status": "skipped", "reason": "Pas assez d'observations pour le clustering."}
 
     pca = PCA(n_components=2, random_state=42)
     X_pca = pca.fit_transform(X)
+
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(X)
 
+    sil = None
+    if len(set(clusters)) > 1 and len(X) > n_clusters:
+        sil = float(silhouette_score(X, clusters))
+
+    # ✅ cluster_sizes JSON-safe (clé int python)
+    counts = Counter(clusters)
+    cluster_sizes = {int(k): int(v) for k, v in counts.items()}
+
+    graph_dir = get_graph_dir_by_id(dataset_id)
     plt.figure()
     plt.scatter(X_pca[:, 0], X_pca[:, 1], c=clusters, cmap="viridis")
     plt.title("Clusters PCA")
-    path = GRAPH_DIR / "pca_clusters.png"
+    path = graph_dir / "pca_clusters.png"
     plt.savefig(path, bbox_inches="tight")
     plt.close()
 
     return {
         "status": "success",
-        "n_clusters": n_clusters,
-        "cluster_labels": clusters.tolist(),
-        "pca_explained_variance": pca.explained_variance_ratio_.tolist(),
-        "scatter_plot": f"/media/graphs/{path.name}",
+        "n_clusters": int(n_clusters),
+        "cluster_labels": [int(x) for x in clusters.tolist()],
+        "cluster_sizes": cluster_sizes,
+        "pca_explained_variance": [float(x) for x in pca.explained_variance_ratio_.tolist()],
+        "kmeans_inertia": float(kmeans.inertia_),
+        "silhouette_score": float(sil) if sil is not None else None,
+        "scatter_plot": f"/media/graphs/dataset_{dataset_id}/{path.name}",
     }
 
 
-# Remplace la fonction _parse_dates par :
-def _parse_dates(series: pd.Series):
+# ------------------------
+# Résumés TEXTE: résumer TOUT ce qui est généré
+# ------------------------
+def _clustering_summary(clustering: dict):
+    if not isinstance(clustering, dict) or clustering.get("status") != "success":
+        return {"status": "skipped"}
+
+    cluster_sizes = clustering.get("cluster_sizes") or {}
+    return {
+        "status": "success",
+        "n_clusters": clustering.get("n_clusters"),
+        "cluster_sizes": cluster_sizes,
+        "pca_explained_variance": clustering.get("pca_explained_variance"),
+        "silhouette_score": clustering.get("silhouette_score"),
+        "kmeans_inertia": clustering.get("kmeans_inertia"),
+    }
+
+
+def _build_graph_summaries_for_generated_graphs(
+    df: pd.DataFrame,
+    types: dict,
+    max_graphs_per_type: int = 8,
+    top_k_categories: int = 15,
+    top_corr_n: int = 15,
+):
     """
-    Convertit une série en datetime sans générer de warnings et compatible avec toutes les versions de pandas.
+    Résume EXACTEMENT les colonnes utilisées pour générer les graphes :
+    - numeric[:max_graphs_per_type] => hist + box + trend
+    - categorical[:max_graphs_per_type] => bar
+    - + matrice corr si >=2 numériques
+    - + trend si date existe
     """
-    try:
-        return pd.to_datetime(series, errors="coerce",dayfirst=True)
-    except Exception:
-        # fallback très strict
-        return pd.to_datetime(series.astype(str), errors="coerce",dayfirst=True)
+    used_numeric = types.get("numeric", [])[:max_graphs_per_type]
+    used_categorical = types.get("categorical", [])[:max_graphs_per_type]
 
+    summaries = {
+        "numeric": {},
+        "categorical": {},
+        "correlations": [],
+        "trends": {},
+        "used_columns": {
+            "numeric": used_numeric,
+            "categorical": used_categorical,
+            "date": types.get("date", []),
+        },
+        "meta": {
+            "note": "Text/numeric summaries of generated plots. The LLM does not read PNG files."
+        },
+    }
 
+    for col in used_numeric:
+        s = pd.to_numeric(df[col], errors="coerce").dropna()
+        if s.empty:
+            summaries["numeric"][col] = {"error": "no numeric data"}
+            continue
 
-import pandas as pd
+        q1 = float(s.quantile(0.25))
+        q3 = float(s.quantile(0.75))
+        iqr = q3 - q1
+        lower = q1 - 1.5 * iqr
+        upper = q3 + 1.5 * iqr
+        outliers = int(((s < lower) | (s > upper)).sum())
+
+        summaries["numeric"][col] = {
+            "count": int(s.shape[0]),
+            "missing": int(df[col].isna().sum()),
+            "min": float(s.min()),
+            "max": float(s.max()),
+            "mean": float(s.mean()),
+            "median": float(s.median()),
+            "std": float(s.std(ddof=1)) if s.shape[0] > 1 else 0.0,
+            "q1": q1,
+            "q3": q3,
+            "iqr": float(iqr),
+            "outliers_count": outliers,
+        }
+
+    for col in used_categorical:
+        s = df[col]
+        vc = s.astype(str).value_counts(dropna=False).head(top_k_categories)
+        summaries["categorical"][col] = {
+            "unique_count": int(s.nunique(dropna=False)),
+            "top_values": vc.to_dict(),
+        }
+
+    if len(used_numeric) >= 2:
+        summaries["correlations"] = _top_correlations(df, used_numeric, top_n=top_corr_n)
+
+    if types.get("date") and used_numeric:
+        date_col = types["date"][0]
+        d = df.copy()
+        d[date_col] = _parse_dates(d[date_col])
+
+        for col in used_numeric:
+            tmp = d[[date_col, col]].copy()
+            tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
+            tmp = tmp.dropna(subset=[date_col, col]).sort_values(date_col)
+
+            if tmp.empty:
+                summaries["trends"][col] = {"error": "no data"}
+                continue
+
+            g = tmp.groupby(date_col)[col].mean()
+            if g.shape[0] < 2:
+                summaries["trends"][col] = {"points": int(g.shape[0]), "trend": "insufficient_points"}
+                continue
+
+            x = np.arange(g.shape[0], dtype=float)
+            y = g.values.astype(float)
+            slope = float(np.polyfit(x, y, 1)[0])
+
+            summaries["trends"][col] = {
+                "date_col": date_col,
+                "points": int(g.shape[0]),
+                "start": str(g.index.min()),
+                "end": str(g.index.max()),
+                "min": float(y.min()),
+                "max": float(y.max()),
+                "mean": float(y.mean()),
+                "slope": slope,
+                "trend": "up" if slope > 0 else ("down" if slope < 0 else "flat"),
+            }
+
+    return summaries
+
 
 def drop_id_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Supprime toutes les colonnes dont le nom contient 'id' (case-insensitive).
-    """
-    cols_to_drop = [col for col in df.columns if 'id' in col.lower()]
+    """Supprime toutes les colonnes dont le nom contient 'id' (case-insensitive)."""
+    cols_to_drop = [col for col in df.columns if "id" in col.lower()]
     return df.drop(columns=cols_to_drop)
 
 
-
-def analyze_csv_dataset(dataset_path: str, column_roles: dict | None = None, max_graphs_per_type: int = 8):
-    """
-    Agent 2 : EDA + ML + visualisations.
-    - S'exécute après récupération des rôles de colonnes par agent1.
-    - Produit stats descriptives, graphes, corrélations, clustering.
-    """
-
-
+def analyze_csv_dataset(dataset_path: str, dataset_id: int, column_roles: dict | None = None, max_graphs_per_type: int = 8):
+    print("[EDA] Lecture du dataset...")
     df = pd.read_csv(dataset_path)
     df = drop_id_columns(df)
     dataset_name = Path(dataset_path).stem
-
+    print(f"[EDA] Dataset chargé : {dataset_name}, shape : {df.shape}")
 
     types = _detect_types(df)
-    date_cols = [col for col in types["categorical"] 
-             if pd.api.types.is_datetime64_any_dtype(df[col]) 
-             or pd.to_datetime(df[col], errors='coerce').notna().all()]
-
+    print(f"[EDA] Types détectés : {types}")
 
     result = {
         "status": "success",
@@ -223,82 +352,192 @@ def analyze_csv_dataset(dataset_path: str, column_roles: dict | None = None, max
         "duplicates": int(df.duplicated().sum()),
         "types": types,
         "numeric_summary": df.select_dtypes(include="number").describe().to_dict(),
-        "categorical_summary": {
-    col: df[col].value_counts().to_dict()
-    for col in types["categorical"]
-    if col not in date_cols  # <-- on utilise date_cols détecté automatiquement
-},
+        "categorical_summary": {col: df[col].value_counts().to_dict() for col in types["categorical"]},
     }
 
+    print("[EDA] Calcul des outliers...")
     result["outliers"] = _iqr_outliers(df, types["numeric"])
+    print("[EDA] Outliers calculés.")
+
+    print("[EDA] Calcul des corrélations...")
     result["correlations"] = _top_correlations(df, types["numeric"])
-    result["visualizations"] = _generate_graphs(df, types, dataset_name, max_graphs_per_type)
-    result["clustering"] = _run_clustering(df, types)
+    print("[EDA] Corrélations calculées.")
 
+    print("[EDA] Génération des graphes...")
+    result["visualizations"] = _generate_graphs(df, types, dataset_name, dataset_id, max_graphs_per_type)
+    print(f"[EDA] Graphes générés : {result['visualizations']}")
+
+    result["graph_summaries"] = _build_graph_summaries_for_generated_graphs(
+        df,
+        types,
+        max_graphs_per_type=max_graphs_per_type,
+        top_k_categories=15,
+        top_corr_n=15,
+    )
+
+    print("[EDA] Lancement du clustering...")
+    result["clustering"] = _run_clustering(df, types, dataset_id)
+    print(f"[EDA] Clustering terminé : {result['clustering']}")
+
+    if isinstance(result.get("clustering"), dict) and result["clustering"].get("status") == "success":
+        result["visualizations"].append(result["clustering"]["scatter_plot"])
+
+    result["graph_summaries"]["clustering"] = _clustering_summary(result["clustering"])
+
+    print("[EDA] Analyse terminée.")
     return result
-from PIL import Image
-import numpy as np
-import random
 
-def analyze_image_dataset(image_dir: str, max_images: int = 5):
-    """
-    Analyse un dataset d'images :
-    - Nombre d'images par classe (dossier)
-    - Taille moyenne des images
-    - Affichage aléatoire de quelques images
-    - Histogrammes de pixels (grayscale)
-    """
-    image_dir = Path(image_dir)
-    classes = [d.name for d in image_dir.iterdir() if d.is_dir()]
-    stats = {"num_classes": len(classes), "classes": {}}
 
-    for cls in classes:
-        cls_path = image_dir / cls
-        images = list(cls_path.glob("*.[pj][pn]g"))  # jpg/png
-        stats["classes"][cls] = {"num_images": len(images)}
+def analyze_image_dataset(zip_or_dir: str, dataset_id: int, max_preview: int = 5):
+    """
+    Analyse complète d'un dataset d'images pour le dashboard.
+    IMPORTANT: on ajoute stats["graph_summaries"] (texte) pour le chatbot Groq (texte-only).
+    """
+    from zipfile import ZipFile
+    import random
+    from PIL import Image
+
+    # Dossier d'extraction
+    dataset_path = Path(f"media/datasets_extracted/dataset_{dataset_id}")
+    if zip_or_dir.endswith(".zip"):
+        with ZipFile(zip_or_dir, "r") as zip_ref:
+            zip_ref.extractall(dataset_path)
+        print(f"[DEBUG] ZIP extrait vers: {dataset_path}")
+    else:
+        dataset_path = Path(zip_or_dir)
+
+    # 1) Détecter classes
+    classes = [d for d in dataset_path.rglob("*") if d.is_dir() and any(d.glob("*.*"))]
+    class_names = [c.name for c in classes]
+    stats = {"status": "success", "num_classes": len(classes), "classes": {}}
+    print(f"[DEBUG] Classes détectées: {class_names}")
+
+    # 2) Stats + collecte PCA
+    all_images = []
+    labels = []
+    for cls_path in classes:
+        cls_name = cls_path.name
+
+        images = []
+        for ext in ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.gif"]:
+            images += list(cls_path.glob(ext))
+            images += list(cls_path.glob(ext.upper()))
+
+        stats["classes"][cls_name] = {"num_images": len(images)}
+
         widths, heights = [], []
         for img_path in images:
             try:
                 img = Image.open(img_path)
                 widths.append(img.width)
                 heights.append(img.height)
-            except Exception:
-                continue
+
+                all_images.append(np.array(img.convert("RGB").resize((64, 64))).flatten())
+                labels.append(cls_name)
+            except Exception as e:
+                print("[DEBUG] Image open failed:", img_path, e)
+
         if widths:
-            stats["classes"][cls]["avg_width"] = int(np.mean(widths))
-            stats["classes"][cls]["avg_height"] = int(np.mean(heights))
+            stats["classes"][cls_name]["avg_width"] = int(np.mean(widths))
+            stats["classes"][cls_name]["avg_height"] = int(np.mean(heights))
 
-    # Affichage aléatoire
-    random_imgs = []
-    for cls in classes:
-        cls_path = image_dir / cls
-        imgs = list(cls_path.glob("*.[pj][pn]g"))
-        random_imgs += random.sample(imgs, min(max_images, len(imgs)))
+    # 3) Preview
+    preview_images = []
+    for cls_path in classes:
+        imgs = []
+        for ext in ["*.jpg", "*.jpeg", "*.png", "*.bmp", "*.gif"]:
+            imgs += list(cls_path.glob(ext))
+            imgs += list(cls_path.glob(ext.upper()))
+        if imgs:
+            preview_images += random.sample(imgs, min(max_preview, len(imgs)))
 
-    for i, img_path in enumerate(random_imgs):
-        img = Image.open(img_path)
-        plt.figure()
-        plt.imshow(img)
-        plt.axis("off")
-        plt.title(f"{img_path.parent.name} - {img_path.name}")
-        path = GRAPH_DIR / f"image_preview_{i}.png"
-        plt.savefig(path, bbox_inches="tight")
-        plt.close()
-        stats[f"preview_{i}"] = f"/media/graphs/{path.name}"
+    stats.setdefault("visualizations", [])
+    graph_dir = Path("media/graphs") / f"dataset_{dataset_id}"
+    graph_dir.mkdir(parents=True, exist_ok=True)
 
-    # Histogrammes de pixels (grayscale)
-    for i, img_path in enumerate(random_imgs):
+    # 3a) Previews (PNG)
+    for i, img_path in enumerate(preview_images):
         try:
-            img = Image.open(img_path).convert("L")  # convert to grayscale
+            img = Image.open(img_path)
+            plt.figure()
+            plt.imshow(img)
+            plt.axis("off")
+            plt.title(f"{img_path.parent.name} - {img_path.name}")
+            save_path = graph_dir / f"image_preview_{i}.png"
+            plt.savefig(save_path, bbox_inches="tight")
+            plt.close()
+            stats["visualizations"].append({"type": "image_preview", "path": f"/media/graphs/dataset_{dataset_id}/image_preview_{i}.png"})
+        except Exception as e:
+            print("[DEBUG] Preview failed:", img_path, e)
+
+    # 4) Histogrammes pixels (PNG + résumé)
+    pixel_hists = []
+    for i, img_path in enumerate(preview_images):
+        try:
+            img = Image.open(img_path).convert("L")
             arr = np.array(img)
+
+            hist_counts, _ = np.histogram(arr.flatten(), bins=256, range=(0, 255))
+            pixel_hists.append(
+                {
+                    "image": img_path.name,
+                    "mean_pixel": float(arr.mean()),
+                    "std_pixel": float(arr.std()),
+                    "min_pixel": int(arr.min()),
+                    "max_pixel": int(arr.max()),
+                    "counts": hist_counts.tolist(),
+                }
+            )
+
             plt.figure()
             plt.hist(arr.flatten(), bins=256, color="gray")
             plt.title(f"Histogramme pixels - {img_path.name}")
-            path = GRAPH_DIR / f"image_hist_{i}.png"
-            plt.savefig(path, bbox_inches="tight")
+            save_path = graph_dir / f"image_hist_{i}.png"
+            plt.savefig(save_path, bbox_inches="tight")
             plt.close()
-            stats[f"hist_{i}"] = f"/media/graphs/{path.name}"
-        except Exception:
-            continue
+            stats["visualizations"].append({"type": "histogram", "path": f"/media/graphs/dataset_{dataset_id}/image_hist_{i}.png"})
+        except Exception as e:
+            print("[DEBUG] Histogram failed:", img_path, e)
+
+    # 5) PCA (PNG + résumé)
+    pca_summary = {"status": "skipped", "reason": "no images"}
+    if all_images:
+        try:
+            all_images_np = np.array(all_images)
+            pca = PCA(n_components=2, random_state=42)
+            emb = pca.fit_transform(all_images_np)
+
+            plt.figure(figsize=(6, 6))
+            for cls_name in class_names:
+                idxs = [i for i, l in enumerate(labels) if l == cls_name]
+                if idxs:
+                    plt.scatter(emb[idxs, 0], emb[idxs, 1], label=cls_name, s=12)
+
+            plt.title("PCA des images")
+            plt.legend()
+            save_path = graph_dir / "pca_plot.png"
+            plt.savefig(save_path, bbox_inches="tight")
+            plt.close()
+            stats["visualizations"].append({"type": "pca", "path": f"/media/graphs/dataset_{dataset_id}/pca_plot.png"})
+
+            pca_summary = {
+                "status": "success",
+                "n_samples": int(all_images_np.shape[0]),
+                "explained_variance_ratio": [float(x) for x in pca.explained_variance_ratio_.tolist()],
+                "classes_included": class_names,
+            }
+        except Exception as e:
+            print("[DEBUG] PCA failed:", e)
+            pca_summary = {"status": "failed", "error": str(e)}
+
+    stats["graph_summaries"] = {
+        "image_dataset": {
+            "num_classes": stats["num_classes"],
+            "classes": stats["classes"],
+            "preview_count": len(preview_images),
+        },
+        "pixel_histograms_from_previews": pixel_hists,
+        "pca": pca_summary,
+    }
 
     return stats

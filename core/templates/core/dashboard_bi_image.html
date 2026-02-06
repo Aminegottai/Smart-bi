@@ -1,0 +1,142 @@
+{% include "core/chatbot_panel.html" %}
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>Dashboard Images</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-100 text-slate-900">
+<div class="min-h-screen flex">
+
+  <!-- SIDEBAR -->
+  <aside class="w-64 bg-slate-900 text-white hidden md:flex flex-col">
+    <div class="px-6 py-6 text-2xl font-bold border-b border-slate-700">Smart BI</div>
+    <nav class="flex-1 px-4 py-6 space-y-3 text-sm">
+      <a class="block px-3 py-2 rounded-lg bg-slate-800">Dashboard</a>
+      <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Exploration</a>
+      <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Rapports</a>
+      <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Modèles ML</a>
+      <a class="block px-3 py-2 rounded-lg hover:bg-slate-800">Paramètres</a>
+    </nav>
+    <div class="px-4 py-4 text-xs text-slate-400 border-t border-slate-700">v1.0</div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="flex-1 flex flex-col">
+    <!-- HEADER -->
+    <header class="bg-white border-b border-slate-200">
+      <div class="max-w-7xl mx-auto px-6 py-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 class="text-2xl md:text-3xl font-bold">Dashboard Image</h1>
+          <p class="text-slate-500">Analyse intelligente des images</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-sm">
+            Dataset: <strong id="dataset_name" class="text-indigo-600">{{ dataset_name }}</strong>
+          </span>
+          <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-sm">
+            Classes: <strong id="kpi_classes">--</strong>
+          </span>
+          <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200 text-sm">
+            Images totales: <strong id="kpi_images">--</strong>
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <!-- CONTENT -->
+    <main class="max-w-7xl mx-auto px-6 py-8 space-y-6 w-full">
+
+      <!-- STATS CLASSES -->
+      <section class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl shadow-sm p-5 border border-slate-200">
+          <h2 class="text-sm text-slate-500">Statistiques par classe</h2>
+          <div id="classes" class="mt-2 space-y-3"></div>
+        </div>
+      </section>
+
+      <!-- VISUALS -->
+      <section class="bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold">Visualisations</h2>
+        </div>
+        <div id="graphs" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+try {
+    const result = JSON.parse('{{ agent2_result_json|escapejs }}');
+    console.log("[DEBUG IMAGE RESULT]", result);
+
+    // 🔹 KPI Classes & Images
+    const kpiClasses = Object.keys(result.classes || {}).length;
+    const kpiImages = Object.values(result.classes || {}).reduce((a,b)=>a+(b.num_images||0),0);
+    document.getElementById("kpi_classes").innerText = kpiClasses;
+    document.getElementById("kpi_images").innerText = kpiImages;
+
+    // 🔹 Classes stats
+    const classesDiv = document.getElementById("classes");
+    for (const cls in result.classes) {
+      const c = result.classes[cls];
+      const card = document.createElement("div");
+      card.className = "bg-slate-50 p-4 rounded-xl border border-slate-200";
+      card.innerHTML = `
+        <h3 class="font-semibold text-slate-700">${cls}</h3>
+        <ul class="text-sm text-slate-600 space-y-1 mt-2">
+          <li>Images: <span class="font-medium">${c.num_images}</span></li>
+          <li>Taille moyenne: <span class="font-medium">${c.avg_width || '--'} x ${c.avg_height || '--'}</span></li>
+        </ul>`;
+      classesDiv.appendChild(card);
+    }
+
+    // 🔹 Visualisations
+    const graphsDiv = document.getElementById("graphs");
+    (result.visualizations||[]).forEach(v=>{
+      const wrapper = document.createElement("div");
+      wrapper.className = "bg-slate-50 p-3 rounded-xl border border-slate-200";
+
+      const img = document.createElement("img");
+      img.src = v.path;
+      img.className = "rounded-lg w-full h-auto";
+
+      const caption = document.createElement("p");
+      caption.className = "text-xs text-slate-500 mt-2";
+      caption.innerText = v.type;
+
+      wrapper.appendChild(img);
+      wrapper.appendChild(caption);
+      graphsDiv.appendChild(wrapper);
+    });
+} catch(e){
+    console.error("[DEBUG] JS ERROR:", e);
+}
+async function sendQuestion() {
+    const question = document.getElementById("chat-input").value;
+
+    const response = await fetch("/chatbot/{{ dataset.id }}/", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            question: question
+        })
+    });
+
+    const data = await response.json();
+    document.getElementById("chat-response").innerText = data.answer;}
+</script>
+
+<footer class="text-center text-xs text-slate-500 py-6">
+  Généré par Smart BI
+</footer>
+</body>
+</html>
