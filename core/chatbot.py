@@ -6,19 +6,20 @@ from dotenv import load_dotenv
 
 from core.models import Dataset
 
-# Charge .env (doit contenir: GROQ_API_KEY=...)
-# Place le fichier .env à la racine du projet (là où tu lances Django/manage.py)
 load_dotenv()
 
-# Cache temporaire pour stocker les réponses LLM
 llm_results_cache = {}
+
+# ✅ Limite stricte pour Groq
+MAX_PROMPT_CHARS = 10000  # ~2500 tokens (4 chars ≈ 1 token)
+MAX_RESPONSE_TOKENS = 400  # Réduit pour laisser plus de place au prompt
 
 
 # ------------------------
 # Fonctions utilitaires
 # ------------------------
 def make_json_safe(obj):
-    """Convertit numpy/pandas en types Python sérialisables (list/dict/str/int...)."""
+    """Convertit numpy/pandas en types Python sérialisables."""
     import numpy as np
     import pandas as pd
 
@@ -37,44 +38,18 @@ def make_json_safe(obj):
     return str(obj)
 
 
-def summarize_json_part(json_part, max_keys=10):
-    """Résume une partie du JSON pour éviter trop de tokens."""
-    json_part = make_json_safe(json_part)
-
-    if isinstance(json_part, dict):
-        return {k: json_part[k] for i, k in enumerate(json_part) if i < max_keys}
-    if isinstance(json_part, list):
-        return json_part[:max_keys]
-    return json_part
-
-
-def chunk_json(json_obj, max_keys_per_chunk=500):
-    """Découpe le JSON en chunks plus petits (si besoin)."""
-    json_obj = make_json_safe(json_obj)
-
-    chunks = []
-    if isinstance(json_obj, dict):
-        keys = list(json_obj.keys())
-        for i in range(0, len(keys), max_keys_per_chunk):
-            chunk = {k: json_obj[k] for k in keys[i : i + max_keys_per_chunk]}
-            chunks.append(make_json_safe(chunk))
-    elif isinstance(json_obj, list):
-        for i in range(0, len(json_obj), max_keys_per_chunk):
-            chunk = json_obj[i : i + max_keys_per_chunk]
-            chunks.append(make_json_safe(chunk))
-    else:
-        chunks.append(make_json_safe(json_obj))
-    return chunks
+def truncate_text(text, max_chars):
+    """Tronque le texte intelligemment."""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n... [truncated]"
 
 
 # ------------------------
-# Résumés texte (graphes + clustering) pour Groq (texte-only)
+# Résumés compacts
 # ------------------------
-def extract_graph_summaries_text(analysis_json_safe, max_chars=6000):
-    """
-    Transforme analysis_json['graph_summaries'] en texte.
-    Groq ne lit pas les images, donc on envoie ce résumé (stats/tendances/corrélations).
-    """
+def extract_graph_summaries_text(analysis_json_safe, max_chars=2000):
+    """Extrait résumés de graphes (version compacte)."""
     if not isinstance(analysis_json_safe, dict):
         return ""
 
@@ -82,16 +57,13 @@ def extract_graph_summaries_text(analysis_json_safe, max_chars=6000):
     if not gs:
         return ""
 
-    text = "=== GRAPH SUMMARIES (from plots) ===\n"
-    text += json.dumps(gs, ensure_ascii=False, indent=2)
-    return text[:max_chars]
+    text = "=== GRAPHIQUES ===\n"
+    text += json.dumps(gs, ensure_ascii=False, indent=1)
+    return truncate_text(text, max_chars)
 
 
-def extract_clustering_text(analysis_json_safe, max_chars=2500):
-    """
-    Envoie explicitement le bloc clustering au LLM
-    (cluster_sizes, silhouette_score, PCA variance, inertie, etc.)
-    """
+def extract_clustering_text(analysis_json_safe, max_chars=1500):
+    """Extrait infos clustering (version compacte)."""
     if not isinstance(analysis_json_safe, dict):
         return ""
 
@@ -99,67 +71,119 @@ def extract_clustering_text(analysis_json_safe, max_chars=2500):
     if not clustering:
         return ""
 
-    text = "=== CLUSTERING (KMeans + PCA) ===\n"
-    text += json.dumps(clustering, ensure_ascii=False, indent=2)
-    return text[:max_chars]
+    text = "=== CLUSTERING ===\n"
+    text += json.dumps(clustering, ensure_ascii=False, indent=1)
+    return truncate_text(text, max_chars)
 
 
 # ------------------------
-# Construction du prompt
+# Construction du prompt (avec limite stricte)
 # ------------------------
-def build_analysis_context(json_chunk, dataset_type="csv"):
-    """
-    Prépare le contexte pour le LLM à partir d'un JSON chunk.
-    dataset_type: 'csv' ou 'image'
-    """
-    context = f"Dataset type: {dataset_type}\n"
-    context += json.dumps(make_json_safe(json_chunk), indent=2, ensure_ascii=False)
+def build_context(json_chunk, dataset_type, graphs_text, clustering_text, max_chars):
+    """Construit le contexte en respectant la limite de caractères."""
+    context = f"Type: {dataset_type}\n\n"
+    
+    remaining = max_chars - len(context) - 200  # Réserve pour question
+    
+    # Priorise graphiques et clustering
+    if graphs_text:
+        allocated = min(len(graphs_text), remaining // 3)
+        context += truncate_text(graphs_text, allocated) + "\n\n"
+        remaining -= allocated
+    
+    if clustering_text:
+        allocated = min(len(clustering_text), remaining // 3)
+        context += truncate_text(clustering_text, allocated) + "\n\n"
+        remaining -= allocated
+    
+    # Ajoute chunk data
+    if json_chunk and remaining > 500:
+        chunk_str = json.dumps(make_json_safe(json_chunk), indent=1, ensure_ascii=False)
+        context += "=== DONNÉES ===\n"
+        context += truncate_text(chunk_str, remaining)
+    
     return context
 
 
 def build_prompt(context, question):
-    """Construit le prompt final pour LLM."""
-    return f"{context}\n\nQuestion: {question}\nRéponds clairement et succinctement."
+    """Construit le prompt final avec limite stricte."""
+    full_prompt = f"{context}\n\nQuestion: {question}\nRéponds de façon claire et concise."
+    
+    # ✅ Sécurité : tronque si trop long
+    if len(full_prompt) > MAX_PROMPT_CHARS:
+        full_prompt = truncate_text(full_prompt, MAX_PROMPT_CHARS - 100)
+        full_prompt += f"\n\nQuestion: {question}\nRéponds brièvement."
+    
+    return full_prompt
 
 
 # ------------------------
-# Appel au modèle LLM via GROQ API (open-source models)
+# Appel Groq avec gestion erreurs
 # ------------------------
 def ask_groq(
     prompt,
     model="llama-3.1-8b-instant",
-    max_tokens=500,
+    max_tokens=MAX_RESPONSE_TOKENS,
     temperature=0.0,
 ):
-    """
-    Appel LLM via Groq API.
-    Nécessite: GROQ_API_KEY (via .env ou variables d'environnement).
-    """
+    """Appel LLM via Groq avec retry sur rate limit."""
     from groq import Groq
+    import time
 
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        return "❌ GROQ_API_KEY manquante (mets-la dans .env ou dans les variables d'environnement)."
+        return "❌ GROQ_API_KEY manquante."
+
+    # ✅ Vérifie taille du prompt (sécurité)
+    estimated_tokens = len(prompt) // 4
+    if estimated_tokens + max_tokens > 5500:  # Marge de sécurité
+        max_tokens = max(100, 5500 - estimated_tokens)
+        prompt = truncate_text(prompt, MAX_PROMPT_CHARS)
 
     client = Groq(api_key=api_key)
 
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": "Réponds clairement et succinctement."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    return resp.choices[0].message.content.strip()
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Réponds clairement et succinctement."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return resp.choices[0].message.content.strip()
+    
+    except Exception as e:
+        error_msg = str(e)
+        
+        # ✅ Si rate limit, réessaye avec prompt plus court
+        if "413" in error_msg or "rate_limit" in error_msg.lower():
+            print(f"⚠️ Rate limit hit, réduction du prompt...")
+            shorter_prompt = truncate_text(prompt, MAX_PROMPT_CHARS // 2)
+            
+            try:
+                time.sleep(1)  # Petite pause
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "Réponds brièvement."},
+                        {"role": "user", "content": shorter_prompt},
+                    ],
+                    temperature=temperature,
+                    max_tokens=200,  # Réduit drastiquement
+                )
+                return resp.choices[0].message.content.strip()
+            except:
+                return "⚠️ Prompt trop long, impossible de répondre. Pose une question plus ciblée."
+        
+        return f"❌ Erreur API: {error_msg}"
 
 
 # ------------------------
-# Traitement LLM dans un thread (avec RAG)
+# Traitement LLM avec RAG
 # ------------------------
 def process_llm(dataset_id, question):
-    """Thread pour traiter la question via LLM et stocker la réponse dans le cache (RAG + graph summaries + clustering)."""
     try:
         from core.rag import RAGIndex
 
@@ -168,47 +192,47 @@ def process_llm(dataset_id, question):
             llm_results_cache[dataset_id] = "Analyse non disponible."
             return
 
-        # Convertir JSON string en objet Python si nécessaire
         if isinstance(dataset.analysis_json, str):
             analysis_json = json.loads(dataset.analysis_json)
         else:
             analysis_json = dataset.analysis_json
 
         analysis_json_safe = make_json_safe(analysis_json)
-
         dataset_type = "csv" if dataset.file.name.lower().endswith(".csv") else "image"
 
-        # ✅ Toujours injecter ces résumés dans le prompt
-        graphs_text = extract_graph_summaries_text(analysis_json_safe)
-        clustering_text = extract_clustering_text(analysis_json_safe)
+        # ✅ Résumés compacts
+        graphs_text = extract_graph_summaries_text(analysis_json_safe, max_chars=1500)
+        clustering_text = extract_clustering_text(analysis_json_safe, max_chars=1000)
 
-        # RAG: sélectionner les chunks pertinents
+        # RAG
         rag = RAGIndex()
         rag.build(analysis_json_safe)
         top_chunks = rag.query(question, top_k=2)
 
-        # Si RAG ne retourne rien, on tente quand même avec graphs_text/clustering_text
         if not top_chunks:
-            base_context = f"Dataset type: {dataset_type}\n"
-            if graphs_text:
-                base_context += graphs_text + "\n\n"
-            if clustering_text:
-                base_context += clustering_text + "\n\n"
-
-            llm_results_cache[dataset_id] = ask_groq(build_prompt(base_context, question))
+            # Contexte minimal
+            context = build_context(
+                json_chunk=None,
+                dataset_type=dataset_type,
+                graphs_text=graphs_text,
+                clustering_text=clustering_text,
+                max_chars=MAX_PROMPT_CHARS - 500
+            )
+            prompt = build_prompt(context, question)
+            llm_results_cache[dataset_id] = ask_groq(prompt)
             return
 
+        # Traite chaque chunk séparément
         partial_answers = []
-        for chunk_text in top_chunks:
-            chunk_text = chunk_text[:8000]
-
-            context = f"Dataset type: {dataset_type}\n"
-            if graphs_text:
-                context += graphs_text + "\n\n"
-            if clustering_text:
-                context += clustering_text + "\n\n"
-            context += chunk_text
-
+        for chunk_text in top_chunks[:2]:  # Max 2 chunks
+            context = build_context(
+                json_chunk=chunk_text[:3000],  # Limite chunk
+                dataset_type=dataset_type,
+                graphs_text=graphs_text,
+                clustering_text=clustering_text,
+                max_chars=MAX_PROMPT_CHARS - 500
+            )
+            
             prompt = build_prompt(context, question)
             answer = ask_groq(prompt)
             partial_answers.append(answer)
@@ -220,7 +244,6 @@ def process_llm(dataset_id, question):
 
 
 def start_llm_thread(dataset_id, question):
-    """Lance le traitement LLM dans un thread."""
     thread = threading.Thread(target=process_llm, args=(dataset_id, question))
     thread.daemon = True
     thread.start()

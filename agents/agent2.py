@@ -68,6 +68,9 @@ def _iqr_outliers(df: pd.DataFrame, num_cols):
 
 
 def _top_correlations(df: pd.DataFrame, num_cols, top_n: int = 15):
+    """
+    Retourne les top N paires de colonnes les plus corrélées.
+    """
     if len(num_cols) < 2:
         return []
     corr = df[num_cols].corr(numeric_only=True).abs()
@@ -80,6 +83,27 @@ def _top_correlations(df: pd.DataFrame, num_cols, top_n: int = 15):
     )
     pairs = pairs.sort_values("corr", ascending=False)
     return pairs.head(top_n).to_dict(orient="records")
+
+
+# ✅ NOUVELLE FONCTION: Matrice de corrélation complète JSON-safe
+def _full_correlation_matrix(df: pd.DataFrame, num_cols) -> dict:
+    """
+    Retourne la matrice de corrélation complète en format JSON-safe.
+    """
+    if len(num_cols) < 2:
+        return {}
+    
+    corr = df[num_cols].corr(numeric_only=True)
+    
+    # Convertit en dict avec valeurs float Python (pas numpy)
+    corr_dict = {}
+    for col in corr.columns:
+        corr_dict[col] = {
+            row: float(corr.loc[row, col]) 
+            for row in corr.index
+        }
+    
+    return corr_dict
 
 
 def _generate_graphs(
@@ -178,7 +202,6 @@ def _run_clustering(df: pd.DataFrame, types: dict, dataset_id: int):
     if len(set(clusters)) > 1 and len(X) > n_clusters:
         sil = float(silhouette_score(X, clusters))
 
-    # ✅ cluster_sizes JSON-safe (clé int python)
     counts = Counter(clusters)
     cluster_sizes = {int(k): int(v) for k, v in counts.items()}
 
@@ -202,10 +225,8 @@ def _run_clustering(df: pd.DataFrame, types: dict, dataset_id: int):
     }
 
 
-# ------------------------
-# Résumés TEXTE: résumer TOUT ce qui est généré
-# ------------------------
 def _clustering_summary(clustering: dict):
+    """Résumé du clustering pour le LLM."""
     if not isinstance(clustering, dict) or clustering.get("status") != "success":
         return {"status": "skipped"}
 
@@ -228,11 +249,10 @@ def _build_graph_summaries_for_generated_graphs(
     top_corr_n: int = 15,
 ):
     """
-    Résume EXACTEMENT les colonnes utilisées pour générer les graphes :
-    - numeric[:max_graphs_per_type] => hist + box + trend
-    - categorical[:max_graphs_per_type] => bar
-    - + matrice corr si >=2 numériques
-    - + trend si date existe
+    Résume EXACTEMENT les colonnes utilisées pour générer les graphes.
+    
+    ✅ MODIFIÉ: Inclut maintenant la matrice de corrélation complète
+    pour que le LLM puisse répondre aux questions sur les corrélations.
     """
     used_numeric = types.get("numeric", [])[:max_graphs_per_type]
     used_categorical = types.get("categorical", [])[:max_graphs_per_type]
@@ -240,7 +260,8 @@ def _build_graph_summaries_for_generated_graphs(
     summaries = {
         "numeric": {},
         "categorical": {},
-        "correlations": [],
+        "correlations": [],           # ✅ Top corrélations (paires)
+        "correlation_matrix": {},     # ✅ NOUVEAU: Matrice complète
         "trends": {},
         "used_columns": {
             "numeric": used_numeric,
@@ -252,6 +273,7 @@ def _build_graph_summaries_for_generated_graphs(
         },
     }
 
+    # Résumé des colonnes numériques (pour histogrammes et boxplots)
     for col in used_numeric:
         s = pd.to_numeric(df[col], errors="coerce").dropna()
         if s.empty:
@@ -279,6 +301,7 @@ def _build_graph_summaries_for_generated_graphs(
             "outliers_count": outliers,
         }
 
+    # Résumé des colonnes catégorielles (pour barplots)
     for col in used_categorical:
         s = df[col]
         vc = s.astype(str).value_counts(dropna=False).head(top_k_categories)
@@ -287,9 +310,15 @@ def _build_graph_summaries_for_generated_graphs(
             "top_values": vc.to_dict(),
         }
 
+    # ✅ Corrélations (top paires + matrice complète)
     if len(used_numeric) >= 2:
+        # Top N paires les plus corrélées
         summaries["correlations"] = _top_correlations(df, used_numeric, top_n=top_corr_n)
+        
+        # ✅ NOUVEAU: Matrice de corrélation complète pour le LLM
+        summaries["correlation_matrix"] = _full_correlation_matrix(df, used_numeric)
 
+    # Tendances temporelles
     if types.get("date") and used_numeric:
         date_col = types["date"][0]
         d = df.copy()
@@ -335,6 +364,12 @@ def drop_id_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def analyze_csv_dataset(dataset_path: str, dataset_id: int, column_roles: dict | None = None, max_graphs_per_type: int = 8):
+    """
+    Analyse complète d'un dataset CSV.
+    
+    ✅ MODIFIÉ: Inclut la matrice de corrélation dans graph_summaries
+    pour que le chatbot LLM puisse répondre aux questions sur les corrélations.
+    """
     print("[EDA] Lecture du dataset...")
     df = pd.read_csv(dataset_path)
     df = drop_id_columns(df)
@@ -361,12 +396,16 @@ def analyze_csv_dataset(dataset_path: str, dataset_id: int, column_roles: dict |
 
     print("[EDA] Calcul des corrélations...")
     result["correlations"] = _top_correlations(df, types["numeric"])
+    
+    # ✅ NOUVEAU: Matrice de corrélation complète au niveau racine
+    result["correlation_matrix"] = _full_correlation_matrix(df, types["numeric"])
     print("[EDA] Corrélations calculées.")
 
     print("[EDA] Génération des graphes...")
     result["visualizations"] = _generate_graphs(df, types, dataset_name, dataset_id, max_graphs_per_type)
     print(f"[EDA] Graphes générés : {result['visualizations']}")
 
+    # ✅ graph_summaries inclut maintenant correlation_matrix
     result["graph_summaries"] = _build_graph_summaries_for_generated_graphs(
         df,
         types,
@@ -391,7 +430,8 @@ def analyze_csv_dataset(dataset_path: str, dataset_id: int, column_roles: dict |
 def analyze_image_dataset(zip_or_dir: str, dataset_id: int, max_preview: int = 5):
     """
     Analyse complète d'un dataset d'images pour le dashboard.
-    IMPORTANT: on ajoute stats["graph_summaries"] (texte) pour le chatbot Groq (texte-only).
+    
+    ✅ Inclut graph_summaries (texte) pour le chatbot Groq (texte-only).
     """
     from zipfile import ZipFile
     import random
@@ -485,7 +525,8 @@ def analyze_image_dataset(zip_or_dir: str, dataset_id: int, max_preview: int = 5
                     "std_pixel": float(arr.std()),
                     "min_pixel": int(arr.min()),
                     "max_pixel": int(arr.max()),
-                    "counts": hist_counts.tolist(),
+                    # ✅ Optionnel: on peut retirer counts pour réduire la taille
+                    # "counts": hist_counts.tolist(),
                 }
             )
 
@@ -530,6 +571,7 @@ def analyze_image_dataset(zip_or_dir: str, dataset_id: int, max_preview: int = 5
             print("[DEBUG] PCA failed:", e)
             pca_summary = {"status": "failed", "error": str(e)}
 
+    # ✅ graph_summaries pour le chatbot LLM (texte-only)
     stats["graph_summaries"] = {
         "image_dataset": {
             "num_classes": stats["num_classes"],
@@ -538,6 +580,9 @@ def analyze_image_dataset(zip_or_dir: str, dataset_id: int, max_preview: int = 5
         },
         "pixel_histograms_from_previews": pixel_hists,
         "pca": pca_summary,
+        "meta": {
+            "note": "Text summaries for LLM chatbot. The LLM cannot read PNG files directly."
+        },
     }
 
     return stats
